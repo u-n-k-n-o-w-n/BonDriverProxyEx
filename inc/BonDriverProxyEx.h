@@ -325,6 +325,7 @@ class cProxyServerEx {
 	cEvent m_Error;
 	BOOL m_bTunerOpen;
 	HANDLE m_hTsRead;
+	std::list<cProxyServerEx *> *m_pTsReceiversList;
 	BOOL * volatile m_pStopTsRead;
 	cCriticalSection *m_pTsLock;
 	DWORD *m_ppos;
@@ -351,6 +352,7 @@ private:
 	void makePacket(enumCommand eCmd, BYTE *pSrc, DWORD dwSize, float fSignalLevel);
 	static DWORD WINAPI Sender(LPVOID pv);
 	static DWORD WINAPI TsReader(LPVOID pv);
+	void StopTsReceive();
 
 	BOOL SelectBonDriver(LPCSTR p);
 	IBonDriver *CreateBonDriver();
