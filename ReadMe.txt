@@ -41,7 +41,9 @@ BONDRIVER=PT-T
 何かしらバグがある可能性は高めです。
 よっしゃテストしたるわ、という方がいたら追試していただけたらと思います。
 
-ライセンス等に関しては元のBonDriverProxyと同じなので、そちらのReadMe.txtを確認してくださいね。
+// ライセンス
+MITライセンスとします。
+LICENSE.txt参照。
 
 Jun/10/2014 unknown <unknown_@live.jp>
 
