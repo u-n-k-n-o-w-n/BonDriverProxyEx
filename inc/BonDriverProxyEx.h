@@ -63,8 +63,8 @@ static int Init(HMODULE hModule)
 		char tag[4], buf[MAX_PATH * 4];
 		for (int i = 0; i < MAX_DRIVERS; i++)
 		{
-			tag[0] = '0' + (i / 10);
-			tag[1] = '0' + (i % 10);
+			tag[0] = (char)('0' + (i / 10));
+			tag[1] = (char)('0' + (i % 10));
 			tag[2] = '\0';
 			GetPrivateProfileStringA("BONDRIVER", tag, "", buf, sizeof(buf), szIniPath);
 			if (buf[0] == '\0')
@@ -79,7 +79,7 @@ static int Init(HMODULE hModule)
 			strcpy(str, buf);
 			pos = pp[0] = str;
 			cntD = 1;
-			while (1)
+			for (;;)
 			{
 				p = strchr(pos, ';');
 				if (p)
@@ -140,6 +140,7 @@ public:
 
 class cLock {
 	cCriticalSection &m_c;
+	cLock &operator=(const cLock &);	// shut up C4512
 public:
 	cLock(cCriticalSection &ref) : m_c(ref) { m_c.Enter(); }
 	~cLock(){ m_c.Leave(); }
@@ -210,17 +211,13 @@ class cPacketHolder {
 	friend class cProxyServerEx;
 	union {
 		stPacket *m_pPacket;
-		BYTE *m_pBuff;
+		BYTE *m_pBuf;
 	};
 	size_t m_Size;
 
 	inline void init(size_t PayloadSize)
 	{
-		m_pBuff = new BYTE[sizeof(stPacketHead) + PayloadSize];
-		::memset(m_pBuff, 0, sizeof(stPacketHead));
-		m_pPacket->head.m_bSync = SYNC_BYTE;
-		m_pPacket->head.m_dwBodyLength = ::htonl((DWORD)PayloadSize);
-		m_Size = sizeof(stPacketHead) + PayloadSize;
+		m_pBuf = new BYTE[sizeof(stPacketHead) + PayloadSize];
 	}
 
 public:
@@ -232,16 +229,16 @@ public:
 	cPacketHolder(enumCommand eCmd, size_t PayloadSize)
 	{
 		init(PayloadSize);
+		*(DWORD *)m_pBuf = 0;
+		m_pPacket->head.m_bSync = SYNC_BYTE;
 		SetCommand(eCmd);
+		m_pPacket->head.m_dwBodyLength = ::htonl((DWORD)PayloadSize);
+		m_Size = sizeof(stPacketHead) + PayloadSize;
 	}
 
 	~cPacketHolder()
 	{
-		if (m_pBuff)
-		{
-			delete[] m_pBuff;
-			m_pBuff = NULL;
-		}
+		delete[] m_pBuf;
 	}
 	inline BOOL IsValid(){ return (m_pPacket->head.m_bSync == SYNC_BYTE); }
 	inline BOOL IsTS(){ return (m_pPacket->head.m_bCommand == (BYTE)eGetTsStream); }
@@ -254,6 +251,7 @@ class cPacketFifo : protected std::queue<cPacketHolder *> {
 	const size_t m_fifoSize;
 	cCriticalSection m_Lock;
 	cEvent m_Event;
+	cPacketFifo &operator=(const cPacketFifo &);	// shut up C4512
 
 public:
 	cPacketFifo() : m_fifoSize(g_PacketFifoSize), m_Event(TRUE, FALSE){}
@@ -344,7 +342,7 @@ public:
 private:
 #endif
 	DWORD Process();
-	int ReceiverHelper(char *pDst, int left);
+	int ReceiverHelper(char *pDst, DWORD left);
 	static DWORD WINAPI Receiver(LPVOID pv);
 	void makePacket(enumCommand eCmd, BOOL b);
 	void makePacket(enumCommand eCmd, DWORD dw);
