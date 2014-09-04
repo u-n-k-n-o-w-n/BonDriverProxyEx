@@ -863,7 +863,7 @@ DWORD WINAPI cProxyServerEx::TsReader(LPVOID pv)
 #endif
 					left = dwSize - dwLen;
 					pBuf += dwLen;
-					while (left > TsPacketBufSize)
+					while (left >= TsPacketBufSize)
 					{
 						for (std::list<cProxyServerEx *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
 							(*it)->makePacket(eGetTsStream, pBuf, TsPacketBufSize, fSignalLevel);
