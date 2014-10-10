@@ -61,6 +61,9 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.4.3 (Oct/11/2014)
+	・空きドライバの検索順序設定機能を追加
+
 version 1.1.4.2 (Aug/28/2014)
 	・受信スレッドの冗長なチェックを削除
 	・delete対象として、NULLでない場合が大半の物に付いてはNULLチェック削除
