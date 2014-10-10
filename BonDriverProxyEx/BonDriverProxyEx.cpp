@@ -22,6 +22,7 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 	m_dwSpace = m_dwChannel = 0xff;
 	m_pDriversMapKey = NULL;
 	m_iDriverNo = -1;
+	m_iDriverUseOrder = 0;
 }
 
 cProxyServerEx::~cProxyServerEx()
@@ -56,8 +57,8 @@ cProxyServerEx::~cProxyServerEx()
 			m_pIBon->Release();
 		if (m_hModule)
 		{
-			stDrivers *pstDrivers = DriversMap[m_pDriversMapKey];
-			pstDrivers[m_iDriverNo].bUsed = FALSE;
+			std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
+			vstDriver[m_iDriverNo].bUsed = FALSE;
 			::FreeLibrary(m_hModule);
 		}
 	}
@@ -166,6 +167,17 @@ DWORD cProxyServerEx::Process()
 					makePacket(eSelectBonDriver, FALSE);
 				else
 				{
+					char *p;
+					if ((p = ::strrchr((char *)(pPh->m_pPacket->payload), ':')) != NULL)
+					{
+						if (::strcmp(p, ":desc") == 0)	// 降順
+						{
+							*p = '\0';
+							m_iDriverUseOrder = 1;
+						}
+						else if (::strcmp(p, ":asc") == 0)	// 昇順
+							*p = '\0';
+					}
 					BOOL b = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload));
 					if (b)
 						InstanceList.push_back(this);
@@ -399,8 +411,8 @@ DWORD cProxyServerEx::Process()
 											// かつモジュール使用者も無しならモジュールリリース
 											if (!bModule)
 											{
-												stDrivers *pstDrivers = DriversMap[m_pDriversMapKey];
-												pstDrivers[m_iDriverNo].bUsed = FALSE;
+												std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
+												vstDriver[m_iDriverNo].bUsed = FALSE;
 												::FreeLibrary(m_hModule);
 												// m_hModule = NULL;
 											}
@@ -936,32 +948,38 @@ void cProxyServerEx::StopTsReceive()
 BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 {
 	char *pKey = NULL;
-	stDrivers *pstDrivers = NULL;
-	for (std::map<char *, stDrivers *>::iterator it = DriversMap.begin(); it != DriversMap.end(); ++it)
+	std::vector<stDriver> *pvstDriver = NULL;
+	for (std::map<char *, std::vector<stDriver> >::iterator it = DriversMap.begin(); it != DriversMap.end(); ++it)
 	{
 		if (::strcmp(p, it->first) == 0)
 		{
 			pKey = it->first;
-			pstDrivers = it->second;
+			pvstDriver = &(it->second);
 			break;
 		}
 	}
-	if (pstDrivers == NULL)
+	if (pvstDriver == NULL)
 	{
 		m_hModule = NULL;
 		return FALSE;
 	}
 
 	// まず使われてないのを探す
-	for (int i = 0; pstDrivers[i].strBonDriver != NULL; i++)
+	std::vector<stDriver> &vstDriver = *pvstDriver;
+	int i;
+	if (m_iDriverUseOrder == 0)
+		i = 0;
+	else
+		i = (int)(vstDriver.size() - 1);
+	for (;;)
 	{
-		if (pstDrivers[i].bUsed)
-			continue;
-		HMODULE hModule = ::LoadLibraryA(pstDrivers[i].strBonDriver);
+		if (vstDriver[i].bUsed)
+			goto next;
+		HMODULE hModule = ::LoadLibraryA(vstDriver[i].strBonDriver);
 		if (hModule != NULL)
 		{
 			m_hModule = hModule;
-			pstDrivers[i].bUsed = TRUE;
+			vstDriver[i].bUsed = TRUE;
 			m_pDriversMapKey = pKey;
 			m_iDriverNo = i;
 
@@ -981,6 +999,19 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 			m_pTsLock = NULL;
 			m_ppos = NULL;
 			return TRUE;
+		}
+	next:
+		if (m_iDriverUseOrder == 0)
+		{
+			if (i >= (vstDriver.size() - 1))
+				break;
+			i++;
+		}
+		else
+		{
+			if (i <= 0)
+				break;
+			i--;
 		}
 	}
 
@@ -1256,7 +1287,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 	return DefWindowProc(hWnd, iMsg, wParam, lParam);
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmdLine*/, int nCmdShow)
 {
 	static HANDLE hLogFile = CreateFile(_T("dbglog.txt"), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);

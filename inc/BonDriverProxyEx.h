@@ -28,12 +28,12 @@ static size_t g_TsFifoSize;
 static DWORD g_TsPacketBufSize;
 
 #define MAX_DRIVERS	64		// ドライバのグループ数とグループ内の数の両方
-static char **g_ppDrivers[MAX_DRIVERS];
-struct stDrivers {
+static char **g_ppDriver[MAX_DRIVERS];
+struct stDriver {
 	char *strBonDriver;
 	BOOL bUsed;
 };
-static std::map<char *, stDrivers *> DriversMap;
+static std::map<char *, std::vector<stDriver> > DriversMap;
 
 static int Init(HMODULE hModule)
 {
@@ -59,7 +59,7 @@ static int Init(HMODULE hModule)
 		// 00=PT-T;BonDriver_PT3-T0.dll;BonDriver_PT3-T1.dll
 		// 01=PT-S;BonDriver_PT3-S0.dll;BonDriver_PT3-S1.dll
 		int cntD, cntT = 0;
-		char *str, *p, *pos, *pp[MAX_DRIVERS], **ppDrivers;
+		char *str, *p, *pos, *pp[MAX_DRIVERS], **ppDriver;
 		char tag[4], buf[MAX_PATH * 4];
 		for (int i = 0; i < MAX_DRIVERS; i++)
 		{
@@ -69,7 +69,7 @@ static int Init(HMODULE hModule)
 			GetPrivateProfileStringA("BONDRIVER", tag, "", buf, sizeof(buf), szIniPath);
 			if (buf[0] == '\0')
 			{
-				g_ppDrivers[cntT] = NULL;
+				g_ppDriver[cntT] = NULL;
 				break;
 			}
 
@@ -97,16 +97,15 @@ static int Init(HMODULE hModule)
 				delete[] str;
 				continue;
 			}
-			ppDrivers = g_ppDrivers[cntT++] = new char *[cntD + 1];
-			memcpy(ppDrivers, pp, sizeof(char *) * cntD);
-			ppDrivers[cntD] = NULL;
-			stDrivers *pstDrivers = new stDrivers[cntD];
-			for (int j = 0; j < cntD; j++)
+			ppDriver = g_ppDriver[cntT++] = new char *[cntD];
+			memcpy(ppDriver, pp, sizeof(char *) * cntD);
+			std::vector<stDriver> vstDriver(cntD - 1);
+			for (int j = 1; j < cntD; j++)
 			{
-				pstDrivers[j].strBonDriver = ppDrivers[j + 1];
-				pstDrivers[j].bUsed = FALSE;
+				vstDriver[j-1].strBonDriver = ppDriver[j];
+				vstDriver[j-1].bUsed = FALSE;
 			}
-			DriversMap[ppDrivers[0]] = pstDrivers;
+			DriversMap[ppDriver[0]] = vstDriver;
 		}
 	}
 
@@ -115,15 +114,13 @@ static int Init(HMODULE hModule)
 
 static void CleanUp()
 {
-	for (std::map<char *, stDrivers *>::iterator it = DriversMap.begin(); it != DriversMap.end(); ++it)
-		delete it->second;
 	DriversMap.clear();
 	for (int i = 0; i < MAX_DRIVERS; i++)
 	{
-		if (g_ppDrivers[i] == NULL)
+		if (g_ppDriver[i] == NULL)
 			break;
-		delete[] g_ppDrivers[i][0];
-		delete[] g_ppDrivers[i];
+		delete[] g_ppDriver[i][0];
+		delete[] g_ppDriver[i];
 	}
 }
 
@@ -332,6 +329,7 @@ class cProxyServerEx {
 	DWORD m_dwChannel;
 	char *m_pDriversMapKey;
 	int m_iDriverNo;
+	int m_iDriverUseOrder;
 #if _DEBUG
 public:
 #endif
