@@ -1003,7 +1003,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 	next:
 		if (m_iDriverUseOrder == 0)
 		{
-			if (i >= (vstDriver.size() - 1))
+			if (i >= (int)(vstDriver.size() - 1))
 				break;
 			i++;
 		}
@@ -1119,6 +1119,8 @@ const BOOL cProxyServerEx::OpenTuner(void)
 	BOOL b = FALSE;
 	if (m_pIBon)
 		b = m_pIBon->OpenTuner();
+	if (g_OpenTunerRetDelay != 0)
+		::Sleep(g_OpenTunerRetDelay);
 	return b;
 }
 

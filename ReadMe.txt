@@ -61,6 +61,9 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.4.4 (Oct/17/2014)
+	・OpenTuner()の呼び出しが完了した後、指定時間ディレイさせる事ができる機能を追加
+
 version 1.1.4.3 (Oct/11/2014)
 	・空きドライバの検索順序設定機能を追加
 

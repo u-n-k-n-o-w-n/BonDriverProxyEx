@@ -26,6 +26,7 @@ static unsigned short g_Port;
 static size_t g_PacketFifoSize;
 static size_t g_TsFifoSize;
 static DWORD g_TsPacketBufSize;
+static DWORD g_OpenTunerRetDelay;
 
 #define MAX_DRIVERS	64		// ドライバのグループ数とグループ内の数の両方
 static char **g_ppDriver[MAX_DRIVERS];
@@ -47,6 +48,7 @@ static int Init(HMODULE hModule)
 
 	GetPrivateProfileStringA("OPTION", "ADDRESS", "127.0.0.1", g_Host, sizeof(g_Host), szIniPath);
 	g_Port = (unsigned short)GetPrivateProfileIntA("OPTION", "PORT", 1192, szIniPath);
+	g_OpenTunerRetDelay = GetPrivateProfileIntA("OPTION", "OPENTUNER_RETURN_DELAY", 0, szIniPath);
 
 	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 16, szIniPath);
 	g_TsFifoSize = GetPrivateProfileIntA("SYSTEM", "TS_FIFO_SIZE", 32, szIniPath);
