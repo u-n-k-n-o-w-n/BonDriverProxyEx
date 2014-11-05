@@ -19,7 +19,7 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 	m_pStopTsRead = NULL;
 	m_pTsLock = NULL;
 	m_ppos = NULL;
-	m_dwSpace = m_dwChannel = 0xff;
+	m_dwSpace = m_dwChannel = 0xffffffff;
 	m_pDriversMapKey = NULL;
 	m_iDriverNo = -1;
 	m_iDriverUseOrder = 0;
@@ -359,18 +359,17 @@ DWORD cProxyServerEx::Process()
 								// 今クライアントがオープンしているチューナに関して
 								if (m_pIBon != NULL)
 								{
-									std::list<cProxyServerEx *>::iterator it2;
 									BOOL bModule = FALSE;
 									BOOL bIBon = FALSE;
 									BOOL bTuner = FALSE;
-									for (it2 = InstanceList.begin(); it2 != InstanceList.end(); ++it2)
+									for (std::list<cProxyServerEx *>::iterator it2 = InstanceList.begin(); it2 != InstanceList.end(); ++it2)
 									{
 										if (*it2 == this)
 											continue;
-										if ((m_hModule == (*it2)->m_hModule))
+										if (m_hModule == (*it2)->m_hModule)
 										{
 											bModule = TRUE;	// モジュール使用者有り
-											if ((m_pIBon == (*it2)->m_pIBon))
+											if (m_pIBon == (*it2)->m_pIBon)
 											{
 												bIBon = TRUE;	// インスタンス使用者有り
 												if ((*it2)->m_bTunerOpen)
