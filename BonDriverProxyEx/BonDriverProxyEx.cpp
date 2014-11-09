@@ -19,7 +19,7 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 	m_pStopTsRead = NULL;
 	m_pTsLock = NULL;
 	m_ppos = NULL;
-	m_dwSpace = m_dwChannel = 0xffffffff;
+	m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
 	m_pDriversMapKey = NULL;
 	m_iDriverNo = -1;
 	m_iDriverUseOrder = 0;
