@@ -13,7 +13,7 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 	m_s = INVALID_SOCKET;
 	m_hModule = NULL;
 	m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
-	m_bTunerOpen = FALSE;
+	m_bTunerOpen = m_bChannelLock = FALSE;
 	m_hTsRead = NULL;
 	m_pTsReceiversList = NULL;
 	m_pStopTsRead = NULL;
@@ -65,10 +65,7 @@ cProxyServerEx::~cProxyServerEx()
 	else
 	{
 		if (m_hTsRead)
-		{
-			LOCK(*m_pTsLock);
 			StopTsReceive();
-		}
 	}
 	if (m_s != INVALID_SOCKET)
 		::closesocket(m_s);
@@ -273,12 +270,23 @@ DWORD cProxyServerEx::Process()
 				{
 					if (m_hTsRead)
 					{
-						LOCK(*m_pTsLock);
-						CloseTuner();
-						*m_ppos = 0;
-						m_bTunerOpen = FALSE;
+						*m_pStopTsRead = TRUE;
+						::WaitForSingleObject(m_hTsRead, INFINITE);
+						::CloseHandle(m_hTsRead);
+						m_hTsRead = NULL;
+						m_pTsReceiversList->clear();
+						delete m_pTsReceiversList;
+						m_pTsReceiversList = NULL;
+						delete m_pStopTsRead;
+						m_pStopTsRead = NULL;
+						delete m_pTsLock;
+						m_pTsLock = NULL;
+						delete m_ppos;
+						m_ppos = NULL;
 					}
+					CloseTuner();
 				}
+				m_bTunerOpen = FALSE;
 				break;
 			}
 
@@ -421,10 +429,7 @@ DWORD cProxyServerEx::Process()
 									{
 										// 現在TSストリーム配信中ならその配信対象リストから自身を削除
 										if (m_hTsRead)
-										{
-											LOCK(*m_pTsLock);
 											StopTsReceive();
-										}
 									}
 								}
 
@@ -914,17 +919,19 @@ void cProxyServerEx::StopTsReceive()
 	// このメソッドは必ず、
 	// 1. グローバルなインスタンスロック中
 	// 2. かつ、TS受信中(m_hTsRead != NULL)
-	// 3. かつ、TS受信インスタンスロック中
-	// の全てを満たす状態で呼び出す事
-	std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
-	while (it != m_pTsReceiversList->end())
+	// の2つを満たす状態で呼び出す事
 	{
-		if (*it == this)
+		LOCK(*m_pTsLock);
+		std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
+		while (it != m_pTsReceiversList->end())
 		{
-			m_pTsReceiversList->erase(it);
-			break;
+			if (*it == this)
+			{
+				m_pTsReceiversList->erase(it);
+				break;
+			}
+			++it;
 		}
-		++it;
 	}
 	// 自分が最後の受信者だった場合は、TS配信スレッドも停止
 	if (m_pTsReceiversList->empty())
@@ -984,10 +991,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 
 			// 各種項目再初期化の前に、現在TSストリーム配信中ならその配信対象リストから自身を削除
 			if (m_hTsRead)
-			{
-				LOCK(*m_pTsLock);
 				StopTsReceive();
-			}
 
 			// eSetChannel2からも呼ばれるので、各種項目再初期化
 			m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
@@ -1039,10 +1043,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		// ここまで粘ったけど結局インスタンスが変わる可能性が大なので、
 		// 現在TSストリーム配信中ならその配信対象リストから自身を削除
 		if (m_hTsRead)
-		{
-			LOCK(*m_pTsLock);
 			StopTsReceive();
-		}
 	}
 
 	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、チャンネルロックされてないのを優先で選択
