@@ -24,7 +24,6 @@
 static char g_Host[64];
 static unsigned short g_Port;
 static size_t g_PacketFifoSize;
-static size_t g_TsFifoSize;
 static DWORD g_TsPacketBufSize;
 static DWORD g_OpenTunerRetDelay;
 
@@ -46,12 +45,16 @@ static int Init(HMODULE hModule)
 	p++;
 	strcpy(p, "ini");
 
+	HANDLE hFile = CreateFileA(szIniPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+		return -2;
+	CloseHandle(hFile);
+
 	GetPrivateProfileStringA("OPTION", "ADDRESS", "127.0.0.1", g_Host, sizeof(g_Host), szIniPath);
 	g_Port = (unsigned short)GetPrivateProfileIntA("OPTION", "PORT", 1192, szIniPath);
 	g_OpenTunerRetDelay = GetPrivateProfileIntA("OPTION", "OPENTUNER_RETURN_DELAY", 0, szIniPath);
 
 	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 16, szIniPath);
-	g_TsFifoSize = GetPrivateProfileIntA("SYSTEM", "TS_FIFO_SIZE", 32, szIniPath);
 	g_TsPacketBufSize = GetPrivateProfileIntA("SYSTEM", "TSPACKET_BUFSIZE", (188 * 1024), szIniPath);
 
 	{

@@ -68,6 +68,13 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.4.5 (Nov/21/2014)
+	・あるBonDriverインスタンスをCloseTuner()する際はTS読み出しスレッドを必ず停止させておくようにした
+	・あるBonDriverインスタンスがCloseTuner()時に、チューナのオープン状態フラグが正しく反映されない
+	  パターンがあるのを修正
+	・レアケースだけどデッドロックするパターンへの対策を追加
+	・iniファイルが存在しなかった場合はエラーになるようにした
+
 version 1.1.4.4 (Oct/17/2014)
 	・OpenTuner()の呼び出しが完了した後、指定時間ディレイさせる事ができる機能を追加
 	  ＃BonDriver_PT(正確には、PT1/2-SDKを使用するBonDriver)へのad-hoc対応
