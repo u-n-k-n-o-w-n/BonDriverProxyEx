@@ -1,6 +1,6 @@
 #ifndef __BONDRIVER_PROXYEX_H__
 #define __BONDRIVER_PROXYEX_H__
-#include <windows.h>
+#include <winsock2.h>
 #include <tchar.h>
 #include <process.h>
 #include <list>
@@ -54,7 +54,7 @@ static int Init(HMODULE hModule)
 	g_Port = (unsigned short)GetPrivateProfileIntA("OPTION", "PORT", 1192, szIniPath);
 	g_OpenTunerRetDelay = GetPrivateProfileIntA("OPTION", "OPENTUNER_RETURN_DELAY", 0, szIniPath);
 
-	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 16, szIniPath);
+	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 64, szIniPath);
 	g_TsPacketBufSize = GetPrivateProfileIntA("SYSTEM", "TSPACKET_BUFSIZE", (188 * 1024), szIniPath);
 
 	{

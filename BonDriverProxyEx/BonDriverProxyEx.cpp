@@ -1,4 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include "BonDriverProxyEx.h"
 
 #if _DEBUG
@@ -1206,8 +1207,8 @@ int Listen(char *host, unsigned short port)
 	if (lsock == INVALID_SOCKET)
 		return 1;
 
-	BOOL reuse = TRUE;
-	setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
+	BOOL exclusive = TRUE;
+	setsockopt(lsock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof(exclusive));
 	memset((char *)&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = inet_addr(host);
