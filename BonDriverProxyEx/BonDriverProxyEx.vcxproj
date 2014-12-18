@@ -159,10 +159,12 @@
     <ResourceCompile Include="BonDriverProxyEx.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\inc\BonDriverProxyEx.h" />
+    <ClInclude Include="..\inc\BdpPacket.h" />
+    <ClInclude Include="..\inc\Common.h" />
     <ClInclude Include="..\inc\IBonDriver.h" />
     <ClInclude Include="..\inc\IBonDriver2.h" />
     <ClInclude Include="..\inc\IBonDriver3.h" />
+    <ClInclude Include="BonDriverProxyEx.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -3,11 +3,104 @@
 #include "BonDriverProxyEx.h"
 
 #if _DEBUG
+#define DETAILLOG	0
+#define DETAILLOG2	0
 static cProxyServerEx *debug;
 #endif
 
-static std::list<cProxyServerEx *> InstanceList;
-static cCriticalSection Lock_Instance;
+static int Init(HMODULE hModule)
+{
+	char szIniPath[MAX_PATH + 16] = { '\0' };
+	GetModuleFileNameA(hModule, szIniPath, MAX_PATH);
+	char *p = strrchr(szIniPath, '.');
+	if (!p)
+		return -1;
+	p++;
+	strcpy(p, "ini");
+
+	HANDLE hFile = CreateFileA(szIniPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+		return -2;
+	CloseHandle(hFile);
+
+	GetPrivateProfileStringA("OPTION", "ADDRESS", "127.0.0.1", g_Host, sizeof(g_Host), szIniPath);
+	g_Port = (unsigned short)GetPrivateProfileIntA("OPTION", "PORT", 1192, szIniPath);
+	g_OpenTunerRetDelay = GetPrivateProfileIntA("OPTION", "OPENTUNER_RETURN_DELAY", 0, szIniPath);
+
+	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 64, szIniPath);
+	g_TsPacketBufSize = GetPrivateProfileIntA("SYSTEM", "TSPACKET_BUFSIZE", (188 * 1024), szIniPath);
+
+	{
+		// [OPTION]
+		// BONDRIVER=PT-T
+		// [BONDRIVER]
+		// 00=PT-T;BonDriver_PT3-T0.dll;BonDriver_PT3-T1.dll
+		// 01=PT-S;BonDriver_PT3-S0.dll;BonDriver_PT3-S1.dll
+		int cntD, cntT = 0;
+		char *str, *p, *pos, *pp[MAX_DRIVERS], **ppDriver;
+		char tag[4], buf[MAX_PATH * 4];
+		for (int i = 0; i < MAX_DRIVERS; i++)
+		{
+			tag[0] = (char)('0' + (i / 10));
+			tag[1] = (char)('0' + (i % 10));
+			tag[2] = '\0';
+			GetPrivateProfileStringA("BONDRIVER", tag, "", buf, sizeof(buf), szIniPath);
+			if (buf[0] == '\0')
+			{
+				g_ppDriver[cntT] = NULL;
+				break;
+			}
+
+			// format: GroupName;BonDriver1;BonDriver2;BonDriver3...
+			// e.g.  : PT-T;BonDriver_PT3-T0.dll;BonDriver-PT3_T1.dll
+			str = new char[strlen(buf) + 1];
+			strcpy(str, buf);
+			pos = pp[0] = str;
+			cntD = 1;
+			for (;;)
+			{
+				p = strchr(pos, ';');
+				if (p)
+				{
+					*p = '\0';
+					pos = pp[cntD++] = p + 1;
+					if (cntD > (MAX_DRIVERS - 1))
+						break;
+				}
+				else
+					break;
+			}
+			if (cntD == 1)
+			{
+				delete[] str;
+				continue;
+			}
+			ppDriver = g_ppDriver[cntT++] = new char *[cntD];
+			memcpy(ppDriver, pp, sizeof(char *) * cntD);
+			std::vector<stDriver> vstDriver(cntD - 1);
+			for (int j = 1; j < cntD; j++)
+			{
+				vstDriver[j-1].strBonDriver = ppDriver[j];
+				vstDriver[j-1].bUsed = FALSE;
+			}
+			DriversMap[ppDriver[0]] = vstDriver;
+		}
+	}
+
+	return 0;
+}
+
+static void CleanUp()
+{
+	DriversMap.clear();
+	for (int i = 0; i < MAX_DRIVERS; i++)
+	{
+		if (g_ppDriver[i] == NULL)
+			break;
+		delete[] g_ppDriver[i][0];
+		delete[] g_ppDriver[i];
+	}
+}
 
 cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 {
@@ -28,13 +121,13 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 
 cProxyServerEx::~cProxyServerEx()
 {
-	LOCK(Lock_Instance);
+	LOCK(g_Lock);
 	BOOL bRelease = TRUE;
-	std::list<cProxyServerEx *>::iterator it = InstanceList.begin();
-	while (it != InstanceList.end())
+	std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin();
+	while (it != g_InstanceList.end())
 	{
 		if (*it == this)
-			InstanceList.erase(it++);
+			g_InstanceList.erase(it++);
 		else
 		{
 			if ((m_hModule != NULL) && (m_hModule == (*it)->m_hModule))
@@ -117,7 +210,7 @@ DWORD cProxyServerEx::Process()
 			// コマンド処理の全体をロックするので、BonDriver_Proxyをロードして自分自身に
 			// 接続させるとデッドロックする
 			// しかしそうしなければ困る状況と言うのは多分無いと思うので、これは仕様と言う事で
-			LOCK(Lock_Instance);
+			LOCK(g_Lock);
 			cPacketHolder *pPh;
 			m_fifoRecv.Pop(&pPh);
 #if _DEBUG && DETAILLOG2
@@ -178,7 +271,7 @@ DWORD cProxyServerEx::Process()
 					}
 					BOOL b = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload));
 					if (b)
-						InstanceList.push_back(this);
+						g_InstanceList.push_back(this);
 					makePacket(eSelectBonDriver, b);
 				}
 				break;
@@ -189,7 +282,7 @@ DWORD cProxyServerEx::Process()
 				if (m_pIBon == NULL)
 				{
 					BOOL bFind = FALSE;
-					for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (*it == this)
 							continue;
@@ -230,7 +323,7 @@ DWORD cProxyServerEx::Process()
 			{
 				BOOL bFind = FALSE;
 				{
-					for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (*it == this)
 							continue;
@@ -254,7 +347,7 @@ DWORD cProxyServerEx::Process()
 			case eCloseTuner:
 			{
 				BOOL bFind = FALSE;
-				for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+				for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 				{
 					if (*it == this)
 						continue;
@@ -351,7 +444,7 @@ DWORD cProxyServerEx::Process()
 					BOOL bLocked = FALSE;
 					BOOL bChanged = FALSE;
 					BOOL bShared = FALSE;
-					for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (*it == this)
 							continue;
@@ -371,7 +464,7 @@ DWORD cProxyServerEx::Process()
 									BOOL bModule = FALSE;
 									BOOL bIBon = FALSE;
 									BOOL bTuner = FALSE;
-									for (std::list<cProxyServerEx *>::iterator it2 = InstanceList.begin(); it2 != InstanceList.end(); ++it2)
+									for (std::list<cProxyServerEx *>::iterator it2 = g_InstanceList.begin(); it2 != g_InstanceList.end(); ++it2)
 									{
 										if (*it2 == this)
 											continue;
@@ -508,7 +601,7 @@ DWORD cProxyServerEx::Process()
 						}
 
 						// 使用チューナのチャンネルロック状態確認
-						for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+						for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 						{
 							if (*it == this)
 								continue;
@@ -542,7 +635,7 @@ DWORD cProxyServerEx::Process()
 						if (b)
 						{
 							// 同一BonDriverインスタンスを使用しているインスタンスの保持チャンネルを変更
-							for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+							for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 							{
 								if (*it == this)
 									continue;
@@ -1025,7 +1118,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		// まず現在のインスタンスがチャンネルロックされてるかどうかチェックする
 		std::list<cProxyServerEx *>::iterator it;
 		BOOL bLocked = FALSE;
-		for (it = InstanceList.begin(); it != InstanceList.end(); ++it)
+		for (it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 		{
 			if (*it == this)
 				continue;
@@ -1048,7 +1141,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 	}
 
 	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、チャンネルロックされてないのを優先で選択
-	for (std::list<cProxyServerEx *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+	for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 	{
 		if (*it == this)
 			continue;
@@ -1068,7 +1161,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 			m_ppos = (*it)->m_ppos;
 			// かなりダサいけど多分現実的に問題になる程ではないので良しとする…
 			BOOL bLocked = FALSE;
-			for (std::list<cProxyServerEx *>::iterator it2 = InstanceList.begin(); it2 != InstanceList.end(); ++it2)
+			for (std::list<cProxyServerEx *>::iterator it2 = g_InstanceList.begin(); it2 != g_InstanceList.end(); ++it2)
 			{
 				if (*it2 == this)
 					continue;
@@ -1190,13 +1283,13 @@ struct HostInfo{
 	char *host;
 	unsigned short port;
 };
-DWORD WINAPI Listen(LPVOID pv)
+static DWORD WINAPI Listen(LPVOID pv)
 {
 	HostInfo *hinfo = static_cast<HostInfo *>(pv);
 	char *host = hinfo->host;
 	unsigned short port = hinfo->port;
 #else
-int Listen(char *host, unsigned short port)
+static int Listen(char *host, unsigned short port)
 {
 #endif
 	SOCKADDR_IN address;
@@ -1347,7 +1440,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 	delete debug;
 
 	{
-		LOCK(Lock_Instance);
+		LOCK(g_Lock);
 		CleanUp();
 	}
 
@@ -1372,7 +1465,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 
 	{
 		// 来ないけど一応
-		LOCK(Lock_Instance);
+		LOCK(g_Lock);
 		CleanUp();
 	}
 
