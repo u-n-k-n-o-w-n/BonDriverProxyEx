@@ -1063,6 +1063,12 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		return FALSE;
 	}
 
+	// 現在時刻を取得しておく
+	SYSTEMTIME stNow;
+	FILETIME ftNow;
+	::GetLocalTime(&stNow);
+	::SystemTimeToFileTime(&stNow, &ftNow);
+
 	// まず使われてないのを探す
 	std::vector<stDriver> &vstDriver = *pvstDriver;
 	int i;
@@ -1079,6 +1085,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		{
 			m_hModule = hModule;
 			vstDriver[i].bUsed = TRUE;
+			vstDriver[i].ftLoad = ftNow;
 			m_pDriversMapKey = pKey;
 			m_iDriverNo = i;
 
@@ -1139,32 +1146,33 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 			StopTsReceive();
 	}
 
-	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、チャンネルロックされてないのを優先で選択
+	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、チャンネルロックされておらず、
+	// BonDriverのロード時刻(もしくは使用要求時刻)が古いのを優先で選択
+	cProxyServerEx *pCandidate = NULL;
+	std::vector<cProxyServerEx *> vpCandidate;
 	for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 	{
 		if (*it == this)
 			continue;
-		if (::strcmp(p, (*it)->m_pDriversMapKey) == 0)	// ひとまず候補
+		if (pKey == (*it)->m_pDriversMapKey)	// この段階では文字列比較である必要は無い
 		{
-			m_hModule = (*it)->m_hModule;
-			m_pDriversMapKey = (*it)->m_pDriversMapKey;
-			m_iDriverNo = (*it)->m_iDriverNo;
-			m_pIBon = (*it)->m_pIBon;	// (*it)->m_pIBonがNULLの可能性はゼロではない
-			m_pIBon2 = (*it)->m_pIBon2;
-			m_pIBon3 = (*it)->m_pIBon3;
-			m_bTunerOpen = (*it)->m_bTunerOpen;
-			m_hTsRead = (*it)->m_hTsRead;
-			m_pTsReceiversList = (*it)->m_pTsReceiversList;
-			m_pStopTsRead = (*it)->m_pStopTsRead;
-			m_pTsLock = (*it)->m_pTsLock;
-			m_ppos = (*it)->m_ppos;
-			// かなりダサいけど多分現実的に問題になる程ではないので良しとする…
+			// 候補リストに既に入れているなら以後のチェックは不要
+			for (i = 0; i < (int)vpCandidate.size(); i++)
+			{
+				if (vpCandidate[i]->m_hModule == (*it)->m_hModule)
+					break;
+			}
+			if (i != (int)vpCandidate.size())
+				continue;
+			// 暫定候補
+			pCandidate = *it;
+			// この暫定候補が使用しているインスタンスはロックされているか？
 			BOOL bLocked = FALSE;
 			for (std::list<cProxyServerEx *>::iterator it2 = g_InstanceList.begin(); it2 != g_InstanceList.end(); ++it2)
 			{
 				if (*it2 == this)
 					continue;
-				if (m_hModule == (*it2)->m_hModule)
+				if (pCandidate->m_hModule == (*it2)->m_hModule)
 				{
 					if ((*it2)->m_bChannelLock)	// ロックされてた
 					{
@@ -1173,10 +1181,49 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 					}
 				}
 			}
-			if (!bLocked)	// ロックされてなければ即決定
-				break;
+			if (!bLocked)	// ロックされていなければ候補リストに追加
+				vpCandidate.push_back(pCandidate);
 		}
 	}
+
+	// 候補リストが空でなければ(==ロックされていないインスタンスがあったなら)
+	if (vpCandidate.size() != 0)
+	{
+		// BonDriverのロード時刻が一番古いのを探す
+		pCandidate = vpCandidate[0];
+		if (vpCandidate.size() > 1)
+		{
+			FILETIME ft = vstDriver[vpCandidate[0]->m_iDriverNo].ftLoad;
+			for (i = 1; i < (int)vpCandidate.size(); i++)
+			{
+				if (::CompareFileTime(&ft, &(vstDriver[vpCandidate[i]->m_iDriverNo].ftLoad)) > 0)
+				{
+					ft = vstDriver[vpCandidate[i]->m_iDriverNo].ftLoad;
+					pCandidate = vpCandidate[i];
+				}
+			}
+		}
+		// 使用するBonDriverのロード時刻(使用要求時刻)を現在時刻で更新
+		vstDriver[pCandidate->m_iDriverNo].ftLoad = ftNow;
+	}
+
+	// NULLである事は無いハズだけど
+	if (pCandidate != NULL)
+	{
+		m_hModule = pCandidate->m_hModule;
+		m_pDriversMapKey = pCandidate->m_pDriversMapKey;
+		m_iDriverNo = pCandidate->m_iDriverNo;
+		m_pIBon = pCandidate->m_pIBon;	// pCandidate->m_pIBonがNULLの可能性はゼロではない
+		m_pIBon2 = pCandidate->m_pIBon2;
+		m_pIBon3 = pCandidate->m_pIBon3;
+		m_bTunerOpen = pCandidate->m_bTunerOpen;
+		m_hTsRead = pCandidate->m_hTsRead;
+		m_pTsReceiversList = pCandidate->m_pTsReceiversList;
+		m_pStopTsRead = pCandidate->m_pStopTsRead;
+		m_pTsLock = pCandidate->m_pTsLock;
+		m_ppos = pCandidate->m_ppos;
+	}
+
 	// 選択したインスタンスが既にTSストリーム配信中なら、その配信対象リストに自身を追加
 	if (m_hTsRead)
 	{

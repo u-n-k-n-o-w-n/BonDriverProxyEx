@@ -33,6 +33,7 @@ static char **g_ppDriver[MAX_DRIVERS];
 struct stDriver {
 	char *strBonDriver;
 	BOOL bUsed;
+	FILETIME ftLoad;
 };
 static std::map<char *, std::vector<stDriver> > DriversMap;
 
