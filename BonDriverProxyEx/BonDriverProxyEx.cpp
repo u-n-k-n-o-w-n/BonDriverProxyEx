@@ -939,7 +939,9 @@ DWORD WINAPI cProxyServerEx::TsReader(LPVOID pv)
 	{
 		if (((now = ::GetTickCount()) - before) >= 1000)
 		{
+			TsLock.Enter();
 			fSignalLevel = pIBon->GetSignalLevel();
+			TsLock.Leave();
 			before = now;
 		}
 		dwSize = dwRemain = 0;
