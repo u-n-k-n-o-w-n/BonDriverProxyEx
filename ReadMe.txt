@@ -68,6 +68,9 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.4.8 (Jan/26/2015)
+	・IBonDriver::Release()内部でのAccess Violation等の発生を無視する設定を追加
+
 version 1.1.4.7 (Dec/23/2014)
 	・あるBonDriverグループに未使用BonDriverが無い状態で当該グループに更に使用要求が来た場合に、
 	  グループのBonDriverインスタンスにチャンネルロックされていない物が複数ある場合は、それらの中で
