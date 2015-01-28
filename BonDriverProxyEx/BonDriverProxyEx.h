@@ -54,14 +54,14 @@ class cProxyServerEx {
 	cCriticalSection *m_pTsLock;
 	DWORD *m_ppos;
 	BOOL m_bChannelLock;
+#if _DEBUG
+public:
+#endif
 	DWORD m_dwSpace;
 	DWORD m_dwChannel;
 	char *m_pDriversMapKey;
 	int m_iDriverNo;
 	int m_iDriverUseOrder;
-#if _DEBUG
-public:
-#endif
 	cPacketFifo m_fifoSend;
 	cPacketFifo m_fifoRecv;
 
