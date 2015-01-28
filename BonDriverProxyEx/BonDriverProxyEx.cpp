@@ -91,15 +91,10 @@ static int Init(HMODULE hModule)
 	{
 		if (g_ppDriver[i] == NULL)
 			break;
-		char buf[(MAX_PATH * 4) + 8];
-		wsprintfA(buf, "%02d: %s\n", i, g_ppDriver[i][0]);
-		OutputDebugStringA(buf);
+		_RPT2(_CRT_WARN, "%02d: %s\n", i, g_ppDriver[i][0]);
 		std::vector<stDriver> &v = DriversMap[g_ppDriver[i][0]];
 		for (size_t j = 0; j < v.size(); j++)
-		{
-			wsprintfA(buf, "  : %s\n", v[j].strBonDriver);
-			OutputDebugStringA(buf);
-		}
+			_RPT1(_CRT_WARN, "  : %s\n", v[j].strBonDriver);
 	}
 #endif
 
@@ -370,25 +365,26 @@ DWORD cProxyServerEx::Process()
 						}
 					}
 				}
-				if (!bFind)
+				if (m_hTsRead)
 				{
-					if (m_hTsRead)
+					if (!bFind)
 					{
 						*m_pStopTsRead = TRUE;
 						::WaitForSingleObject(m_hTsRead, INFINITE);
 						::CloseHandle(m_hTsRead);
-						m_hTsRead = NULL;
-						m_pTsReceiversList->clear();
 						delete m_pTsReceiversList;
-						m_pTsReceiversList = NULL;
 						delete m_pStopTsRead;
-						m_pStopTsRead = NULL;
 						delete m_pTsLock;
-						m_pTsLock = NULL;
 						delete m_ppos;
-						m_ppos = NULL;
+						CloseTuner();
 					}
-					CloseTuner();
+					else
+						StopTsReceive();
+					m_hTsRead = NULL;
+					m_pTsReceiversList = NULL;
+					m_pStopTsRead = NULL;
+					m_pTsLock = NULL;
+					m_ppos = NULL;
 				}
 				m_bTunerOpen = FALSE;
 				break;
@@ -514,7 +510,6 @@ DWORD cProxyServerEx::Process()
 												::WaitForSingleObject(m_hTsRead, INFINITE);
 												::CloseHandle(m_hTsRead);
 												//m_hTsRead = NULL;
-												m_pTsReceiversList->clear();
 												delete m_pTsReceiversList;
 												//m_pTsReceiversList = NULL;
 												delete m_pStopTsRead;
@@ -678,7 +673,6 @@ DWORD cProxyServerEx::Process()
 									if (m_hTsRead == NULL)
 									{
 										delete[] ppv;
-										m_pTsReceiversList->clear();
 										delete m_pTsReceiversList;
 										m_pTsReceiversList = NULL;
 										delete m_pStopTsRead;
@@ -1475,7 +1469,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		Rectangle(hDc, 0, 0, 512, 256);
 		LOCK(g_Lock);
 		int i = 0;
-		char buf[1024];
+		char buf[(MAX_PATH * 4) + 64];
 		std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin();
 		while (it != g_InstanceList.end())
 		{
