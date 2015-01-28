@@ -365,9 +365,9 @@ DWORD cProxyServerEx::Process()
 						}
 					}
 				}
-				if (m_hTsRead)
+				if (!bFind)
 				{
-					if (!bFind)
+					if (m_hTsRead)
 					{
 						*m_pStopTsRead = TRUE;
 						::WaitForSingleObject(m_hTsRead, INFINITE);
@@ -376,16 +376,19 @@ DWORD cProxyServerEx::Process()
 						delete m_pStopTsRead;
 						delete m_pTsLock;
 						delete m_ppos;
-						CloseTuner();
 					}
-					else
-						StopTsReceive();
-					m_hTsRead = NULL;
-					m_pTsReceiversList = NULL;
-					m_pStopTsRead = NULL;
-					m_pTsLock = NULL;
-					m_ppos = NULL;
+					CloseTuner();
 				}
+				else
+				{
+					if (m_hTsRead)
+						StopTsReceive();
+				}
+				m_hTsRead = NULL;
+				m_pTsReceiversList = NULL;
+				m_pStopTsRead = NULL;
+				m_pTsLock = NULL;
+				m_ppos = NULL;
 				m_bTunerOpen = FALSE;
 				break;
 			}
@@ -1054,19 +1057,18 @@ void cProxyServerEx::StopTsReceive()
 	// 1. グローバルなインスタンスロック中
 	// 2. かつ、TS受信中(m_hTsRead != NULL)
 	// の2つを満たす状態で呼び出す事
+	m_pTsLock->Enter();
+	std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
+	while (it != m_pTsReceiversList->end())
 	{
-		LOCK(*m_pTsLock);
-		std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
-		while (it != m_pTsReceiversList->end())
+		if (*it == this)
 		{
-			if (*it == this)
-			{
-				m_pTsReceiversList->erase(it);
-				break;
-			}
-			++it;
+			m_pTsReceiversList->erase(it);
+			break;
 		}
+		++it;
 	}
+	m_pTsLock->Leave();
 	// 自分が最後の受信者だった場合は、TS配信スレッドも停止
 	if (m_pTsReceiversList->empty())
 	{
