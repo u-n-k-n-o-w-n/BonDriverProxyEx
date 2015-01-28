@@ -68,6 +68,10 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.4.9 (Jan/28/2015)
+	・Ex版のサーバに対してほぼ同時に複数のクライアントが接続してきた場合に、同一のBonDriverインスタンスに対して
+	  複数のTS配信スレッドをつくってしまう場合があったのを修正
+
 version 1.1.4.8 (Jan/26/2015)
 	・IBonDriver::Release()内部でのAccess Violation等の発生を無視する設定を追加
 
