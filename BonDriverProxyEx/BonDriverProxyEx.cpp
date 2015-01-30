@@ -25,6 +25,7 @@ static int Init(HMODULE hModule)
 	GetPrivateProfileStringA("OPTION", "PORT", "1192", g_Port, sizeof(g_Port), szIniPath);
 	g_OpenTunerRetDelay = GetPrivateProfileIntA("OPTION", "OPENTUNER_RETURN_DELAY", 0, szIniPath);
 	g_SandBoxedRelease = GetPrivateProfileIntA("OPTION", "SANDBOXED_RELEASE", 0, szIniPath);
+	g_DisableUnloadBonDriver = GetPrivateProfileIntA("OPTION", "DISABLE_UNLOAD_BONDRIVER", 0, szIniPath);
 
 	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 64, szIniPath);
 	g_TsPacketBufSize = GetPrivateProfileIntA("SYSTEM", "TSPACKET_BUFSIZE", (188 * 1024), szIniPath);
@@ -80,6 +81,7 @@ static int Init(HMODULE hModule)
 			for (int j = 1; j < cntD; j++)
 			{
 				vstDriver[j-1].strBonDriver = ppDriver[j];
+				vstDriver[j-1].hModule = NULL;
 				vstDriver[j-1].bUsed = FALSE;
 			}
 			DriversMap[ppDriver[0]] = vstDriver;
@@ -103,14 +105,20 @@ static int Init(HMODULE hModule)
 
 static void CleanUp()
 {
-	DriversMap.clear();
 	for (int i = 0; i < MAX_DRIVERS; i++)
 	{
 		if (g_ppDriver[i] == NULL)
 			break;
+		std::vector<stDriver> &v = DriversMap[g_ppDriver[i][0]];
+		for (size_t j = 0; j < v.size(); j++)
+		{
+			if (v[j].hModule != NULL)
+				FreeLibrary(v[j].hModule);
+		}
 		delete[] g_ppDriver[i][0];
 		delete[] g_ppDriver[i];
 	}
+	DriversMap.clear();
 }
 
 cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
@@ -165,7 +173,11 @@ cProxyServerEx::~cProxyServerEx()
 		{
 			std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
 			vstDriver[m_iDriverNo].bUsed = FALSE;
-			::FreeLibrary(m_hModule);
+			if (!g_DisableUnloadBonDriver)
+			{
+				::FreeLibrary(m_hModule);
+				vstDriver[m_iDriverNo].hModule = NULL;
+			}
 		}
 	}
 	else
@@ -534,7 +546,11 @@ DWORD cProxyServerEx::Process()
 												{
 													std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
 													vstDriver[m_iDriverNo].bUsed = FALSE;
-													::FreeLibrary(m_hModule);
+													if (!g_DisableUnloadBonDriver)
+													{
+														::FreeLibrary(m_hModule);
+														vstDriver[m_iDriverNo].hModule = NULL;
+													}
 													// m_hModule = NULL;
 												}
 											}
@@ -1123,29 +1139,35 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 	{
 		if (vstDriver[i].bUsed)
 			goto next;
-		HMODULE hModule = ::LoadLibraryA(vstDriver[i].strBonDriver);
-		if (hModule != NULL)
+		HMODULE hModule;
+		if (vstDriver[i].hModule != NULL)
+			hModule = vstDriver[i].hModule;
+		else
 		{
-			m_hModule = hModule;
-			vstDriver[i].bUsed = TRUE;
-			vstDriver[i].ftLoad = ftNow;
-			m_pDriversMapKey = pKey;
-			m_iDriverNo = i;
-
-			// 各種項目再初期化の前に、現在TSストリーム配信中ならその配信対象リストから自身を削除
-			if (m_hTsRead)
-				StopTsReceive();
-
-			// eSetChannel2からも呼ばれるので、各種項目再初期化
-			m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
-			m_bTunerOpen = FALSE;
-			m_hTsRead = NULL;
-			m_pTsReceiversList = NULL;
-			m_pStopTsRead = NULL;
-			m_pTsLock = NULL;
-			m_ppos = NULL;
-			return TRUE;
+			hModule = ::LoadLibraryA(vstDriver[i].strBonDriver);
+			if (hModule == NULL)
+				goto next;
+			vstDriver[i].hModule = hModule;
 		}
+		m_hModule = hModule;
+		vstDriver[i].bUsed = TRUE;
+		vstDriver[i].ftLoad = ftNow;
+		m_pDriversMapKey = pKey;
+		m_iDriverNo = i;
+
+		// 各種項目再初期化の前に、現在TSストリーム配信中ならその配信対象リストから自身を削除
+		if (m_hTsRead)
+			StopTsReceive();
+
+		// eSetChannel2からも呼ばれるので、各種項目再初期化
+		m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
+		m_bTunerOpen = FALSE;
+		m_hTsRead = NULL;
+		m_pTsReceiversList = NULL;
+		m_pStopTsRead = NULL;
+		m_pTsLock = NULL;
+		m_ppos = NULL;
+		return TRUE;
 	next:
 		if (m_iDriverUseOrder == 0)
 		{

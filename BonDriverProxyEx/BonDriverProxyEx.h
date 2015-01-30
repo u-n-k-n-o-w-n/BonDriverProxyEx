@@ -26,6 +26,7 @@ static size_t g_PacketFifoSize;
 static DWORD g_TsPacketBufSize;
 static DWORD g_OpenTunerRetDelay;
 static BOOL g_SandBoxedRelease;
+static BOOL g_DisableUnloadBonDriver;
 
 #include "BdpPacket.h"
 
@@ -33,6 +34,7 @@ static BOOL g_SandBoxedRelease;
 static char **g_ppDriver[MAX_DRIVERS];
 struct stDriver {
 	char *strBonDriver;
+	HMODULE hModule;
 	BOOL bUsed;
 	FILETIME ftLoad;
 };
