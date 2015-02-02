@@ -192,8 +192,16 @@ cProxyServerEx::~cProxyServerEx()
 DWORD WINAPI cProxyServerEx::Reception(LPVOID pv)
 {
 	cProxyServerEx *pProxy = static_cast<cProxyServerEx *>(pv);
+
+	// 内部でCOMを使用しているBonDriverに対する対策
+	HRESULT hr = ::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE | COINIT_SPEED_OVER_MEMORY);
+
 	DWORD ret = pProxy->Process();
 	delete pProxy;
+
+	if (SUCCEEDED(hr))
+		::CoUninitialize();
+
 	return ret;
 }
 
@@ -992,6 +1000,8 @@ DWORD WINAPI cProxyServerEx::TsReader(LPVOID pv)
 	DWORD Counter = 0;
 #endif
 
+	// 内部でCOMを使用しているBonDriverに対する対策
+	HRESULT hr = ::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE | COINIT_SPEED_OVER_MEMORY);
 	// TS読み込みループ
 	while (!StopTsRead)
 	{
@@ -1063,6 +1073,8 @@ DWORD WINAPI cProxyServerEx::TsReader(LPVOID pv)
 		if (dwRemain == 0)
 			::Sleep(WAIT_TIME);
 	}
+	if (SUCCEEDED(hr))
+		::CoUninitialize();
 	delete[] pTsBuf;
 	return ret;
 }
