@@ -68,6 +68,9 @@ LICENSE.txt参照。
 Jun/10/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.5.4 (May/06/2015)
+	・タスクトレイから終了と接続クライアント情報の表示/非表示が出来るだけのUIを追加した
+
 version 1.1.5.3 (Feb/23/2015)
 	・BonDriverに対して実際にSetChannel()が行われた場合、それ以降に送信されるTSバッファとCNR値は、
 	  確実にチャンネル変更後に取得した物になるようにした
