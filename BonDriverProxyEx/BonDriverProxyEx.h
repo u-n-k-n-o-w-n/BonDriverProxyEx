@@ -11,6 +11,9 @@
 #include "IBonDriver3.h"
 
 #define HAVE_UI
+#ifdef BUILD_AS_SERVICE
+#undef HAVE_UI
+#endif
 
 #if _DEBUG
 #define _CRTDBG_MAP_ALLOC
@@ -29,6 +32,9 @@ static DWORD g_TsPacketBufSize;
 static DWORD g_OpenTunerRetDelay;
 static BOOL g_SandBoxedRelease;
 static BOOL g_DisableUnloadBonDriver;
+static DWORD g_ProcessPriority;		// ïsóvÇæÇ∆évÇ§ÇØÇ«ï€éùÇµÇƒÇ®Ç≠
+static int g_ThreadPriorityTsReader;
+static int g_ThreadPrioritySender;
 
 #include "BdpPacket.h"
 
@@ -118,13 +124,14 @@ public:
 	cProxyServerEx();
 	~cProxyServerEx();
 	void setSocket(SOCKET s){ m_s = s; }
-#ifdef HAVE_UI
-	void Shutdown(){ m_Error.Set(); }
-#endif
 	static DWORD WINAPI Reception(LPVOID pv);
 };
 
 static std::list<cProxyServerEx *> g_InstanceList;
 static cCriticalSection g_Lock;
+static cEvent g_ShutdownEvent(TRUE, FALSE);
+#if defined(HAVE_UI) || defined(BUILD_AS_SERVICE)
+HANDLE g_hListenThread;
+#endif
 
 #endif	// __BONDRIVER_PROXYEX_H__

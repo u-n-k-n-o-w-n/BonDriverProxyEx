@@ -11,7 +11,8 @@
 #define ID_TASKTRAY			0
 #define ID_TASKTRAY_SHOW	1
 #define ID_TASKTRAY_HIDE	2
-#define ID_TASKTRAY_EXIT	3
+#define ID_TASKTRAY_RELOAD	3
+#define ID_TASKTRAY_EXIT	4
 HINSTANCE g_hInstance;
 HWND g_hWnd;
 HMENU g_hMenu;
@@ -40,6 +41,54 @@ static int Init(HMODULE hModule)
 
 	g_PacketFifoSize = GetPrivateProfileIntA("SYSTEM", "PACKET_FIFO_SIZE", 64, szIniPath);
 	g_TsPacketBufSize = GetPrivateProfileIntA("SYSTEM", "TSPACKET_BUFSIZE", (188 * 1024), szIniPath);
+
+	char szPriority[128];
+	GetPrivateProfileStringA("SYSTEM", "PROCESSPRIORITY", "NORMAL", szPriority, sizeof(szPriority), szIniPath);
+	if (strcmp(szPriority, "REALTIME") == 0)
+		g_ProcessPriority = REALTIME_PRIORITY_CLASS;
+	else if (strcmp(szPriority, "HIGH") == 0)
+		g_ProcessPriority = HIGH_PRIORITY_CLASS;
+	else if (strcmp(szPriority, "ABOVE_NORMAL") == 0)
+		g_ProcessPriority = ABOVE_NORMAL_PRIORITY_CLASS;
+	else if (strcmp(szPriority, "BELOW_NORMAL") == 0)
+		g_ProcessPriority = BELOW_NORMAL_PRIORITY_CLASS;
+	else if (strcmp(szPriority, "IDLE") == 0)
+		g_ProcessPriority = IDLE_PRIORITY_CLASS;
+	else
+		g_ProcessPriority = NORMAL_PRIORITY_CLASS;
+	SetPriorityClass(GetCurrentProcess(), g_ProcessPriority);
+
+	GetPrivateProfileStringA("SYSTEM", "THREADPRIORITY_TSREADER", "NORMAL", szPriority, sizeof(szPriority), szIniPath);
+	if (strcmp(szPriority, "CRITICAL") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_TIME_CRITICAL;
+	else if (strcmp(szPriority, "HIGHEST") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_HIGHEST;
+	else if (strcmp(szPriority, "ABOVE_NORMAL") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_ABOVE_NORMAL;
+	else if (strcmp(szPriority, "BELOW_NORMAL") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_BELOW_NORMAL;
+	else if (strcmp(szPriority, "LOWEST") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_LOWEST;
+	else if (strcmp(szPriority, "IDLE") == 0)
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_IDLE;
+	else
+		g_ThreadPriorityTsReader = THREAD_PRIORITY_NORMAL;
+
+	GetPrivateProfileStringA("SYSTEM", "THREADPRIORITY_SENDER", "NORMAL", szPriority, sizeof(szPriority), szIniPath);
+	if (strcmp(szPriority, "CRITICAL") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_TIME_CRITICAL;
+	else if (strcmp(szPriority, "HIGHEST") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_HIGHEST;
+	else if (strcmp(szPriority, "ABOVE_NORMAL") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_ABOVE_NORMAL;
+	else if (strcmp(szPriority, "BELOW_NORMAL") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_BELOW_NORMAL;
+	else if (strcmp(szPriority, "LOWEST") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_LOWEST;
+	else if (strcmp(szPriority, "IDLE") == 0)
+		g_ThreadPrioritySender = THREAD_PRIORITY_IDLE;
+	else
+		g_ThreadPrioritySender = THREAD_PRIORITY_NORMAL;
 
 	{
 		// [OPTION]
@@ -114,6 +163,41 @@ static int Init(HMODULE hModule)
 	return 0;
 }
 
+#if defined(HAVE_UI) || defined(BUILD_AS_SERVICE)
+static void ShutdownInstances()
+{
+	// シャットダウンイベントトリガ
+	if (!g_ShutdownEvent.IsSet())
+		g_ShutdownEvent.Set();
+
+	// まず待ち受けスレッドの終了を待つ
+	g_Lock.Enter();
+	if (g_hListenThread != NULL)
+	{
+		WaitForSingleObject(g_hListenThread, INFINITE);
+		CloseHandle(g_hListenThread);
+		g_hListenThread = NULL;
+	}
+	g_Lock.Leave();
+
+	// 全クライアントインスタンスの終了を待つ
+	for (;;)
+	{
+		// g_InstanceListの数確認でわざわざロックしてるのは、cProxyServerExインスタンスが
+		// "リストからは削除されていてもデストラクタが終了していない"状態を排除する為
+		g_Lock.Enter();
+		size_t num = g_InstanceList.size();
+		g_Lock.Leave();
+		if (num == 0)
+			break;
+		Sleep(10);
+	}
+
+	// シャットダウンイベントクリア
+	g_ShutdownEvent.Reset();
+}
+#endif
+
 static void CleanUp()
 {
 	for (int i = 0; i < MAX_DRIVERS; i++)
@@ -128,7 +212,7 @@ static void CleanUp()
 		}
 		delete[] g_ppDriver[i][0];
 		delete[] g_ppDriver[i];
-//		g_ppDriver[i] = NULL;
+		g_ppDriver[i] = NULL;
 	}
 	DriversMap.clear();
 }
@@ -221,6 +305,7 @@ DWORD cProxyServerEx::Process()
 	hThread[0] = ::CreateThread(NULL, 0, cProxyServerEx::Sender, this, 0, NULL);
 	if (hThread[0] == NULL)
 		return 1;
+	::SetThreadPriority(hThread[0], g_ThreadPrioritySender);
 
 	hThread[1] = ::CreateThread(NULL, 0, cProxyServerEx::Receiver, this, 0, NULL);
 	if (hThread[1] == NULL)
@@ -231,10 +316,10 @@ DWORD cProxyServerEx::Process()
 		return 2;
 	}
 
-	HANDLE h[2] = { m_Error, m_fifoRecv.GetEventHandle() };
+	HANDLE h[3] = { m_Error, m_fifoRecv.GetEventHandle(), g_ShutdownEvent };
 	for (;;)
 	{
-		DWORD dwRet = ::WaitForMultipleObjects(2, h, FALSE, INFINITE);
+		DWORD dwRet = ::WaitForMultipleObjects(3, h, FALSE, INFINITE);
 		switch (dwRet)
 		{
 		case WAIT_OBJECT_0:
@@ -691,6 +776,8 @@ DWORD cProxyServerEx::Process()
 										m_pTsReaderArg = NULL;
 										m_Error.Set();
 									}
+									else
+										::SetThreadPriority(m_hTsRead, g_ThreadPriorityTsReader);
 								}
 								if (bSetChannel)
 								{
@@ -756,6 +843,9 @@ DWORD cProxyServerEx::Process()
 			break;
 		}
 
+		case WAIT_OBJECT_0 + 2:
+			// 終了要求
+			// fall-through
 		default:
 			// 何かのエラー
 			m_Error.Set();
@@ -1376,22 +1466,26 @@ const BOOL cProxyServerEx::SetLnbPower(const BOOL bEnable)
 	return b;
 }
 
-#ifdef HAVE_UI
+#if defined(HAVE_UI) || defined(BUILD_AS_SERVICE)
 struct HostInfo{
 	char *host;
 	char *port;
 };
 static DWORD WINAPI Listen(LPVOID pv)
 {
-	HostInfo *hinfo = static_cast<HostInfo *>(pv);
-	char *host = hinfo->host;
-	char *port = hinfo->port;
+	HostInfo *phi = static_cast<HostInfo *>(pv);
+	char *host = phi->host;
+	char *port = phi->port;
+	delete phi;
 #else
 static int Listen(char *host, char *port)
 {
 #endif
 	addrinfo hints, *results, *rp;
 	SOCKET lsock, csock;
+	int len;
+	fd_set rd;
+	timeval tv;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -1429,24 +1523,34 @@ static int Listen(char *host, char *port)
 		return 3;
 	}
 
-	for (;;)
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+	while (!g_ShutdownEvent.IsSet())
 	{
-		csock = accept(lsock, NULL, NULL);
-		if (csock == INVALID_SOCKET)
-			continue;
-
-		cProxyServerEx *pProxy = new cProxyServerEx();
-		pProxy->setSocket(csock);
-		HANDLE hThread = ::CreateThread(NULL, 0, cProxyServerEx::Reception, pProxy, 0, NULL);
-		if (hThread)
-			CloseHandle(hThread);
-		else
-			delete pProxy;
+		FD_ZERO(&rd);
+		FD_SET(lsock, &rd);
+		if ((len = select((int)(lsock + 1), &rd, NULL, NULL, &tv)) == SOCKET_ERROR)
+			return 4;
+		if (len > 0)
+		{
+			csock = accept(lsock, NULL, NULL);
+			if (csock == INVALID_SOCKET)
+				continue;
+			cProxyServerEx *pProxy = new cProxyServerEx();
+			pProxy->setSocket(csock);
+			HANDLE hThread = CreateThread(NULL, 0, cProxyServerEx::Reception, pProxy, 0, NULL);
+			if (hThread)
+				CloseHandle(hThread);
+			else
+				delete pProxy;
+		}
 	}
 
-	return 0;	// ここには来ない
+	closesocket(lsock);
+	return 0;
 }
 
+#if !defined(BUILD_AS_SERVICE)
 #ifdef HAVE_UI
 void NotifyIcon(int mode)
 {
@@ -1492,6 +1596,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_DESTROY:
 		PostQuitMessage(0);
+		return 0;
+
+	case WM_CLOSE:
+		ModifyMenu(g_hMenu, 0, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_SHOW, _T("情報ウィンドウ表示"));
+		ShowWindow(hWnd, SW_HIDE);
 		return 0;
 
 	case WM_PAINT:
@@ -1568,14 +1677,44 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 		case ID_TASKTRAY_SHOW:
 		{
 			ModifyMenu(g_hMenu, 0, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_HIDE, _T("情報ウィンドウ非表示"));
-			ShowWindow(g_hWnd, SW_SHOW);
+			ShowWindow(hWnd, SW_SHOW);
 			return 0;
 		}
 
 		case ID_TASKTRAY_HIDE:
 		{
 			ModifyMenu(g_hMenu, 0, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_SHOW, _T("情報ウィンドウ表示"));
-			ShowWindow(g_hWnd, SW_HIDE);
+			ShowWindow(hWnd, SW_HIDE);
+			return 0;
+		}
+
+		case ID_TASKTRAY_RELOAD:
+		{
+			if (g_InstanceList.size() != 0)
+			{
+				if (MessageBox(hWnd, _T("接続中のクライアントが存在しています。切断されますがよろしいですか？"), _T("Caution"), MB_YESNO) != IDYES)
+					return 0;
+			}
+			ShutdownInstances();
+			CleanUp();
+			if (Init(g_hInstance) != 0)
+			{
+				MessageBox(NULL, _T("iniファイルが見つかりません。正しく設置したのち再読み込みして下さい。"), _T("Error"), MB_OK);
+				return 0;
+			}
+			HostInfo *phi = new HostInfo;
+			phi->host = g_Host;
+			phi->port = g_Port;
+			g_hListenThread = CreateThread(NULL, 0, Listen, phi, 0, NULL);
+			if (g_hListenThread == NULL)
+			{
+				delete phi;
+				MessageBox(NULL, _T("待ち受けスレッドの作成に失敗しました。終了します。"), _T("Error"), MB_OK);
+				PostQuitMessage(0);
+			}
+			else
+				MessageBox(hWnd, _T("再読み込みしました。"), _T("Info"), MB_OK);
+
 			return 0;
 		}
 
@@ -1584,24 +1723,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 			if (g_InstanceList.size() != 0)
 			{
 				if (MessageBox(hWnd, _T("接続中のクライアントが存在していますが、よろしいですか？"), _T("Caution"), MB_YESNO) != IDYES)
-					break;
+					return 0;
 			}
-			g_Lock.Enter();
-			std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin();
-			while (it != g_InstanceList.end())
-			{
-				(*it)->Shutdown();
-				++it;
-			}
-			g_Lock.Leave();
-			size_t num;
-			do
-			{
-				Sleep(100);
-				g_Lock.Enter();
-				num = g_InstanceList.size();
-				g_Lock.Leave();
-			} while (num != 0);
 			PostQuitMessage(0);
 			return 0;
 		}
@@ -1634,19 +1757,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 
 	if (Init(hInstance) != 0)
 	{
-		MessageBox(NULL, _T("iniファイルが見つかりません"), _T("Error"), MB_OK);
+		MessageBox(NULL, _T("iniファイルが見つかりません。"), _T("Error"), MB_OK);
 		return -1;
 	}
 
 	WSADATA wsa;
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+	{
+		MessageBox(NULL, _T("winsockの初期化に失敗しました。"), _T("Error"), MB_OK);
 		return -2;
+	}
 
-	HostInfo hinfo;
-	hinfo.host = g_Host;
-	hinfo.port = g_Port;
-	HANDLE hThread = CreateThread(NULL, 0, Listen, &hinfo, 0, NULL);
-	CloseHandle(hThread);
+	HostInfo *phi = new HostInfo;
+	phi->host = g_Host;
+	phi->port = g_Port;
+	g_hListenThread = CreateThread(NULL, 0, Listen, phi, 0, NULL);
+	if (g_hListenThread == NULL)
+	{
+		delete phi;
+		MessageBox(NULL, _T("待ち受けスレッドの作成に失敗しました。"), _T("Error"), MB_OK);
+		return -3;
+	}
 
 	MSG msg;
 	WNDCLASSEX wndclass;
@@ -1666,7 +1797,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 
 	RegisterClassEx(&wndclass);
 
-	g_hWnd = CreateWindow(_T("bdpex"), _T("Information"), WS_OVERLAPPED | WS_THICKFRAME, CW_USEDEFAULT, 0, 640, 320, NULL, NULL, hInstance, NULL);
+	g_hWnd = CreateWindow(_T("bdpex"), _T("Information"), WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME, CW_USEDEFAULT, 0, 640, 320, NULL, NULL, hInstance, NULL);
 
 //	ShowWindow(g_hWnd, nCmdShow);
 //	UpdateWindow(g_hWnd);
@@ -1674,7 +1805,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 	g_hInstance = hInstance;
 	g_hMenu = CreatePopupMenu();
 	InsertMenu(g_hMenu, 0, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_SHOW, _T("情報ウィンドウ表示"));
-	InsertMenu(g_hMenu, 1, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_EXIT, _T("終了"));
+	InsertMenu(g_hMenu, 1, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_RELOAD, _T("ini再読み込み"));
+	InsertMenu(g_hMenu, 2, MF_BYPOSITION | MF_STRING, ID_TASKTRAY_EXIT, _T("終了"));
 	NotifyIcon(0);
 
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -1683,12 +1815,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 		DispatchMessage(&msg);
 	}
 
+	ShutdownInstances();	// g_hListenThreadはこの中でCloseHandle()される
+	CleanUp();				// ShutdownInstances()でDriversMapにアクセスするスレッドは無くなっているはず
+
 	NotifyIcon(1);
 	DestroyMenu(g_hMenu);
 
-	g_Lock.Enter();
-	CleanUp();
-	g_Lock.Leave();
 
 	WSACleanup();
 
@@ -1726,4 +1858,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 	WSACleanup();
 	return ret;
 }
+#endif
+#else
+#include "ServiceMain.cpp"
 #endif
