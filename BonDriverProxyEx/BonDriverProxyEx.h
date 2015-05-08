@@ -131,7 +131,7 @@ static std::list<cProxyServerEx *> g_InstanceList;
 static cCriticalSection g_Lock;
 static cEvent g_ShutdownEvent(TRUE, FALSE);
 #if defined(HAVE_UI) || defined(BUILD_AS_SERVICE)
-HANDLE g_hListenThread;
+static HANDLE g_hListenThread;
 #endif
 
 #endif	// __BONDRIVER_PROXYEX_H__

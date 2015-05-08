@@ -1550,7 +1550,7 @@ static int Listen(char *host, char *port)
 	return 0;
 }
 
-#if !defined(BUILD_AS_SERVICE)
+#ifndef BUILD_AS_SERVICE
 #ifdef HAVE_UI
 void NotifyIcon(int mode)
 {
@@ -1627,14 +1627,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 				{
 					// IPv4
 					SOCKADDR_IN *p4 = (SOCKADDR_IN *)&ss;
+#ifdef _WIN64
 					inet_ntop(AF_INET, &(p4->sin_addr), addr, sizeof(addr));
+#else
+					lstrcpyA(addr, inet_ntoa(p4->sin_addr));
+#endif
 					port = ntohs(p4->sin_port);
 				}
 				else
 				{
 					// IPv6
 					SOCKADDR_IN6 *p6 = (SOCKADDR_IN6 *)&ss;
+#ifdef _WIN64
 					inet_ntop(AF_INET6, &(p6->sin6_addr), addr, sizeof(addr));
+#else
+					char *p = addr;
+					for (int i = 0; i < 16; i += 2)
+						p += wsprintfA(p, "%02x%02x%c", p6->sin6_addr.s6_addr[i], p6->sin6_addr.s6_addr[i + 1], (i != 14) ? ':' : '\0');
+#endif
 					port = ntohs(p6->sin6_port);
 				}
 			}
@@ -1714,7 +1724,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 			}
 			else
 				MessageBox(hWnd, _T("çƒì«Ç›çûÇ›ÇµÇ‹ÇµÇΩÅB"), _T("Info"), MB_OK);
-
 			return 0;
 		}
 
