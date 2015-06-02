@@ -290,7 +290,7 @@ DWORD WINAPI cProxyServerEx::Reception(LPVOID pv)
 	delete pProxy;
 
 #ifdef HAVE_UI
-	::InvalidateRect(g_hWnd, NULL, FALSE);
+	::InvalidateRect(g_hWnd, NULL, TRUE);
 #endif
 
 	if (SUCCEEDED(hr))
@@ -813,7 +813,7 @@ DWORD cProxyServerEx::Process()
 						}
 					}
 #ifdef HAVE_UI
-					::InvalidateRect(g_hWnd, NULL, FALSE);
+					::InvalidateRect(g_hWnd, NULL, TRUE);
 #endif
 				}
 				break;
@@ -1609,12 +1609,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lParam)
 	case WM_PAINT:
 	{
 		PAINTSTRUCT ps;
-		RECT rect;
-		GetClientRect(hWnd, &rect);
 		HDC hDc = BeginPaint(hWnd, &ps);
 		TEXTMETRIC tm;
 		GetTextMetrics(hDc, &tm);
-		Rectangle(hDc, 0, 0, rect.right, rect.bottom);
 		SOCKADDR_STORAGE ss;
 		char addr[INET6_ADDRSTRLEN];
 		int port, len, num = 0;
