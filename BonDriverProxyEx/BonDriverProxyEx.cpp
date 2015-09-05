@@ -222,7 +222,8 @@ cProxyServerEx::cProxyServerEx() : m_Error(TRUE, FALSE)
 	m_s = INVALID_SOCKET;
 	m_hModule = NULL;
 	m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
-	m_bTunerOpen = m_bChannelLock = FALSE;
+	m_bTunerOpen = FALSE;
+	m_bChannelLock = 0;
 	m_hTsRead = NULL;
 	m_pTsReaderArg = NULL;
 	m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
@@ -504,13 +505,27 @@ DWORD cProxyServerEx::Process()
 
 			case ePurgeTsStream:
 			{
-				if (m_hTsRead && m_bChannelLock)
+				if (m_hTsRead)
 				{
+					BOOL bLocked = FALSE;
 					m_pTsReaderArg->TsLock.Enter();
-					PurgeTsStream();
-					m_pTsReaderArg->pos = 0;
+					std::list<cProxyServerEx *>::iterator it = m_pTsReaderArg->TsReceiversList.begin();
+					while (it != m_pTsReaderArg->TsReceiversList.end())
+					{
+						if ((*it != this) && (((*it)->m_bChannelLock > m_bChannelLock) || ((*it)->m_bChannelLock == 0xff)))
+						{
+							bLocked = TRUE;
+							break;
+						}
+						++it;
+					}
+					if (!bLocked)
+					{
+						PurgeTsStream();
+						m_pTsReaderArg->pos = 0;
+					}
 					m_pTsReaderArg->TsLock.Leave();
-					makePacket(ePurgeTsStream, TRUE);
+					makePacket(ePurgeTsStream, (!bLocked ? TRUE : FALSE));
 				}
 				else
 					makePacket(ePurgeTsStream, FALSE);
@@ -654,6 +669,27 @@ DWORD cProxyServerEx::Process()
 										}
 									}
 
+									// このインスタンスが要求している優先度が255であった場合に
+									if (m_bChannelLock == 0xff)
+									{
+										// 切り替え先チューナに対して優先度255のインスタンスが既にいるか？
+										for (std::list<cProxyServerEx *>::iterator it2 = g_InstanceList.begin(); it2 != g_InstanceList.end(); ++it2)
+										{
+											if (*it2 == this)
+												continue;
+											if ((*it2)->m_pIBon == (*it)->m_pIBon)
+											{
+												if ((*it2)->m_bChannelLock == 0xff)
+												{
+													// いた場合は、このインスタンスの優先度を暫定的に254にする
+													// (そうしないと、優先度255のインスタンスもチャンネル変更できなくなる為)
+													m_bChannelLock = 0xfe;
+													break;
+												}
+											}
+										}
+									}
+
 									// インスタンス切り替え
 									m_hModule = (*it)->m_hModule;
 									m_iDriverNo = (*it)->m_iDriverNo;
@@ -718,10 +754,20 @@ DWORD cProxyServerEx::Process()
 							{
 								if (*it == this)
 									continue;
-								if ((m_pIBon == (*it)->m_pIBon) && (*it)->m_bChannelLock)
+								if (m_pIBon == (*it)->m_pIBon)
 								{
-									bLocked = TRUE;
-									break;
+									if ((*it)->m_bChannelLock > m_bChannelLock)
+										bLocked = TRUE;
+									else if ((*it)->m_bChannelLock == 0xff)
+									{
+										// 対象チューナに対して優先度255のインスタンスが既にいる状態で、このインスタンスが
+										// 要求している優先度も255の場合、このインスタンスの優先度を暫定的に254にする
+										// (そうしないと、優先度255のインスタンスもチャンネル変更できなくなる為)
+										m_bChannelLock = 0xfe;
+										bLocked = TRUE;
+									}
+									if (bLocked)
+										break;
 								}
 							}
 						}
@@ -731,7 +777,7 @@ DWORD cProxyServerEx::Process()
 						_RPT3(_CRT_WARN, "             : dwReqSpace[%d] / dwReqChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
 #endif
 
-						if (bLocked && !m_bChannelLock)
+						if (bLocked)
 						{
 							// ロックされてる時は単純にロックされてる事を通知
 							// この場合クライアントアプリへのSetChannel()の戻り値は成功になる
@@ -1259,7 +1305,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 				continue;
 			if (m_hModule == (*it)->m_hModule)
 			{
-				if ((*it)->m_bChannelLock)	// ロックされてた
+				if (((*it)->m_bChannelLock > m_bChannelLock) || ((*it)->m_bChannelLock == 0xff))	// ロックされてた
 				{
 					bLocked = TRUE;
 					break;
@@ -1303,7 +1349,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 					continue;
 				if (pCandidate->m_hModule == (*it2)->m_hModule)
 				{
-					if ((*it2)->m_bChannelLock)	// ロックされてた
+					if (((*it2)->m_bChannelLock > m_bChannelLock) || ((*it2)->m_bChannelLock == 0xff))	// ロックされてた
 					{
 						bLocked = TRUE;
 						break;
