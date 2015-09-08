@@ -56,6 +56,7 @@ struct stTsReaderArg {
 	volatile BOOL ChannelChanged;
 	DWORD pos;
 	std::list<cProxyServerEx *> TsReceiversList;
+	std::list<cProxyServerEx *> WaitExclusivePrivList;
 	cCriticalSection TsLock;
 	stTsReaderArg()
 	{
@@ -101,7 +102,7 @@ private:
 	static DWORD WINAPI TsReader(LPVOID pv);
 	void StopTsReceive();
 
-	BOOL SelectBonDriver(LPCSTR p);
+	BOOL SelectBonDriver(LPCSTR p, BYTE bChannelLock);
 	IBonDriver *CreateBonDriver();
 
 	// IBonDriver
