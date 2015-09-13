@@ -509,25 +509,17 @@ DWORD cProxyServerEx::Process()
 			{
 				if (m_hTsRead)
 				{
-					BOOL bLocked = FALSE;
 					m_pTsReaderArg->TsLock.Enter();
-					std::list<cProxyServerEx *>::iterator it = m_pTsReaderArg->TsReceiversList.begin();
-					while (it != m_pTsReaderArg->TsReceiversList.end())
-					{
-						if ((*it != this) && (((*it)->m_bChannelLock > m_bChannelLock) || ((*it)->m_bChannelLock == 0xff)))
-						{
-							bLocked = TRUE;
-							break;
-						}
-						++it;
-					}
-					if (!bLocked)
+					if (m_pTsReaderArg->TsReceiversList.size() <= 1)
 					{
 						PurgeTsStream();
 						m_pTsReaderArg->pos = 0;
 					}
+#if _DEBUG && DETAILLOG2
+					_RPT2(_CRT_WARN, "ePurgeTsStream : [%d] / size[%zu]\n", (m_pTsReaderArg->TsReceiversList.size() <= 1) ? 1 : 0, m_pTsReaderArg->TsReceiversList.size());
+#endif
 					m_pTsReaderArg->TsLock.Leave();
-					makePacket(ePurgeTsStream, (!bLocked ? TRUE : FALSE));
+					makePacket(ePurgeTsStream, TRUE);
 				}
 				else
 					makePacket(ePurgeTsStream, FALSE);
