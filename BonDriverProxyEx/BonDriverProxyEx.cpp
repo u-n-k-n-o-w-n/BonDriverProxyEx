@@ -1419,31 +1419,9 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p, BYTE bChannelLock)
 		}
 	}
 
-	// eSetChannel2からの呼び出しの場合
-	if (m_pIBon)
-	{
-		// まず現在のインスタンスがチャンネルロックされてるかどうかチェックする
-		std::list<cProxyServerEx *>::iterator it;
-		BOOL bLocked = FALSE;
-		for (it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
-		{
-			if (*it == this)
-				continue;
-			if (m_hModule == (*it)->m_hModule)
-			{
-				if (((*it)->m_bChannelLock > bChannelLock) || ((*it)->m_bChannelLock == 0xff))	// ロックされてた
-				{
-					bLocked = TRUE;
-					break;
-				}
-			}
-		}
-		if (!bLocked)	// ロックされてなければインスタンスはそのままでOK
-			return TRUE;
-	}
-
-	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、チャンネルロックされておらず、
-	// BonDriverのロード時刻(もしくは使用要求時刻)が古いのを優先で選択
+	// 全部使われてたら(あるいはLoadLibrary()出来なければ)、あるインスタンスを使用している
+	// クライアント群のチャンネル優先度の最大値が最も低いインスタンスを選択する
+	// 同値の物が複数あった場合はBonDriverのロード時刻(もしくは使用要求時刻)が古い物を優先
 	cProxyServerEx *pCandidate = NULL;
 	std::vector<cProxyServerEx *> vpCandidate;
 	for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
@@ -1482,25 +1460,100 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p, BYTE bChannelLock)
 		}
 	}
 
+#if _DEBUG && DETAILLOG2
+	_RPT1(_CRT_WARN, "** SelectBonDriver ** : vpCandidate.size[%zd]\n", vpCandidate.size());
+#endif
+
 	// 候補リストが空でなければ(==ロックされていないインスタンスがあったなら)
 	if (vpCandidate.size() != 0)
 	{
-		// BonDriverのロード時刻が一番古いのを探す
 		pCandidate = vpCandidate[0];
+		// 候補に選択の余地はあるか？
 		if (vpCandidate.size() > 1)
 		{
-			FILETIME ft = vstDriver[vpCandidate[0]->m_iDriverNo].ftLoad;
-			for (i = 1; i < (int)vpCandidate.size(); i++)
+			// 接続クライアント群のチャンネル優先度の最大値が最も低いインスタンスを探す
+			// なお若干ややこしいが、自身が排他権を持っており、かつ排他権取得待ちがいた場合も、
+			// 元のインスタンスはこの時点での候補リストに含まれている
+			BYTE bGroupMaxPriv, bMinPriv;
+			std::vector<BYTE> vbGroupMaxPriv(vpCandidate.size());
+			bMinPriv = 0xff;
+			for (i = 0; i < (int)vpCandidate.size(); i++)
 			{
-				if (::CompareFileTime(&ft, &(vstDriver[vpCandidate[i]->m_iDriverNo].ftLoad)) > 0)
+				bGroupMaxPriv = 0;
+				for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 				{
-					ft = vstDriver[vpCandidate[i]->m_iDriverNo].ftLoad;
-					pCandidate = vpCandidate[i];
+					if (*it == this)
+						continue;
+					if (vpCandidate[i]->m_hModule == (*it)->m_hModule)
+					{
+						if ((*it)->m_bChannelLock > bGroupMaxPriv)
+							bGroupMaxPriv = (*it)->m_bChannelLock;
+					}
+				}
+				vbGroupMaxPriv[i] = bGroupMaxPriv;
+				if (bMinPriv > bGroupMaxPriv)
+					bMinPriv = bGroupMaxPriv;
+			}
+			std::vector<cProxyServerEx *> vpCandidate2;
+			for (i = 0; i < (int)vpCandidate.size(); i++)
+			{
+#if _DEBUG && DETAILLOG2
+				_RPT2(_CRT_WARN, "                      : vbGroupMaxPriv[%d] : [%d]\n", i, vbGroupMaxPriv[i]);
+#endif
+				if (vbGroupMaxPriv[i] == bMinPriv)
+					vpCandidate2.push_back(vpCandidate[i]);
+			}
+#if _DEBUG && DETAILLOG2
+			_RPT1(_CRT_WARN, "                      : vpCandidate2.size[%zd]\n", vpCandidate2.size());
+#endif
+			// eSetChannel2からの呼び出しの場合
+			if (m_pIBon)
+			{
+				for (i = 0; i < (int)vpCandidate2.size(); i++)
+				{
+					// この時点での候補リストに現在のインスタンスが含まれていた場合は
+					if (m_hModule == vpCandidate2[i]->m_hModule)
+					{
+						// 現在のインスタンスを継続使用
+						// 「同値の物が複数あった場合はBonDriverのロード時刻(もしくは使用要求時刻)が古い物を優先」
+						// が守られない事になる場合もあるが、効率優先
+						vstDriver[m_iDriverNo].ftLoad = ftNow;
+						return TRUE;
+					}
+				}
+			}
+
+			// vpCandidate2.size()が1以上なのは保証されている
+			pCandidate = vpCandidate2[0];
+			// インスタンス毎の最大優先度の最小値が複数インスタンスで同値であった場合
+			if (vpCandidate2.size() > 1)
+			{
+				// BonDriverのロード時刻が一番古いのを探す
+				FILETIME ft = vstDriver[vpCandidate2[0]->m_iDriverNo].ftLoad;
+				for (i = 1; i < (int)vpCandidate2.size(); i++)
+				{
+					if (::CompareFileTime(&ft, &(vstDriver[vpCandidate2[i]->m_iDriverNo].ftLoad)) > 0)
+					{
+						ft = vstDriver[vpCandidate2[i]->m_iDriverNo].ftLoad;
+						pCandidate = vpCandidate2[i];
+					}
 				}
 			}
 		}
-		// 使用するBonDriverのロード時刻(使用要求時刻)を現在時刻で更新
-		vstDriver[pCandidate->m_iDriverNo].ftLoad = ftNow;
+		else
+		{
+			// eSetChannel2からの呼び出しの場合
+			if (m_pIBon)
+			{
+				// 唯一の候補が現在のインスタンスと同じだった場合は
+				if (m_hModule == pCandidate->m_hModule)
+				{
+					// 現在のインスタンスを継続使用
+					vstDriver[m_iDriverNo].ftLoad = ftNow;
+					return TRUE;
+				}
+			}
+		}
 
 		// eSetChannel2からの呼び出しの場合かつ現在TSストリーム配信中だったなら、
 		// インスタンスが切り替わるので、現在の配信対象リストから自身を削除
@@ -1511,7 +1564,11 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p, BYTE bChannelLock)
 	{
 		// eSetChannel2からの呼び出しの場合
 		if (m_pIBon)
-			return TRUE;	// ロックされていないインスタンスが無かったので結局そのままで
+		{
+			// ロックされていないインスタンスが無かったので現在のインスタンスを継続使用
+			vstDriver[m_iDriverNo].ftLoad = ftNow;
+			return TRUE;
+		}
 	}
 
 	// NULLである事は無いハズだけど
@@ -1528,6 +1585,8 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p, BYTE bChannelLock)
 		m_pTsReaderArg = pCandidate->m_pTsReaderArg;
 		m_dwSpace = pCandidate->m_dwSpace;
 		m_dwChannel = pCandidate->m_dwChannel;
+		// 使用するBonDriverのロード時刻(使用要求時刻)を現在時刻で更新
+		vstDriver[m_iDriverNo].ftLoad = ftNow;
 	}
 
 	// 選択したインスタンスが既にTSストリーム配信中なら、その配信対象リストに自身を追加
