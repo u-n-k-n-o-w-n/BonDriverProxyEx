@@ -25,7 +25,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static char g_Host[256];
+static char g_Host[512];
 static char g_Port[8];
 static size_t g_PacketFifoSize;
 static DWORD g_TsPacketBufSize;

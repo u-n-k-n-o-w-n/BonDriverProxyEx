@@ -97,7 +97,7 @@ static int Init(HMODULE hModule)
 		// 00=PT-T;BonDriver_PT3-T0.dll;BonDriver_PT3-T1.dll
 		// 01=PT-S;BonDriver_PT3-S0.dll;BonDriver_PT3-S1.dll
 		int cntD, cntT = 0;
-		char *str, *p, *pos, *pp[MAX_DRIVERS], **ppDriver;
+		char *str, *pos, *pp[MAX_DRIVERS], **ppDriver;
 		char tag[4], buf[MAX_PATH * 4];
 		for (int i = 0; i < MAX_DRIVERS; i++)
 		{
@@ -112,7 +112,7 @@ static int Init(HMODULE hModule)
 			}
 
 			// format: GroupName;BonDriver1;BonDriver2;BonDriver3...
-			// e.g.  : PT-T;BonDriver_PT3-T0.dll;BonDriver-PT3_T1.dll
+			// e.g.  : PT-T;BonDriver_PT3-T0.dll;BonDriver_PT3-T1.dll
 			str = new char[strlen(buf) + 1];
 			strcpy(str, buf);
 			pos = pp[0] = str;
@@ -1719,74 +1719,116 @@ static int Listen(char *host, char *port)
 {
 #endif
 	addrinfo hints, *results, *rp;
-	SOCKET lsock, csock;
-	int len;
+	SOCKET lsock[8], csock;
+	int i, j, nhost, len;
+	char *p, *hostbuf, *h[8];
 	fd_set rd;
 	timeval tv;
 
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_protocol = IPPROTO_TCP;
-	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-	if (getaddrinfo(host, port, &hints, &results) != 0)
+	hostbuf = new char[strlen(host) + 1];
+	strcpy(hostbuf, host);
+	nhost = 0;
+	p = hostbuf;
+	do
 	{
-		hints.ai_flags = AI_PASSIVE;
-		if (getaddrinfo(host, port, &hints, &results) != 0)
-			return 1;
-	}
-
-	for (rp = results; rp != NULL; rp = rp->ai_next)
-	{
-		lsock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-		if (lsock == INVALID_SOCKET)
-			continue;
-
-		BOOL exclusive = TRUE;
-		setsockopt(lsock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof(exclusive));
-
-		if (bind(lsock, rp->ai_addr, (int)(rp->ai_addrlen)) != SOCKET_ERROR)
+		h[nhost++] = p;
+		if ((p = strchr(p, ',')) != NULL)
+			*p++ = '\0';
+		if (nhost >= 8)
 			break;
+	} while ((p != NULL) && (*p != '\0'));
 
-		closesocket(lsock);
-	}
-	freeaddrinfo(results);
-	if (rp == NULL)
-		return 2;
-
-	if (listen(lsock, 4) == SOCKET_ERROR)
+	for (i = 0; i < nhost; i++)
 	{
-		closesocket(lsock);
-		return 3;
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+		hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+		if (getaddrinfo(h[i], port, &hints, &results) != 0)
+		{
+			hints.ai_flags = AI_PASSIVE;
+			if (getaddrinfo(h[i], port, &hints, &results) != 0)
+			{
+				for (j = 0; j < i; j++)
+					closesocket(lsock[j]);
+				delete[] hostbuf;
+				return 1;
+			}
+		}
+
+		for (rp = results; rp != NULL; rp = rp->ai_next)
+		{
+			lsock[i] = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+			if (lsock[i] == INVALID_SOCKET)
+				continue;
+
+			BOOL exclusive = TRUE;
+			setsockopt(lsock[i], SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof(exclusive));
+
+			if (bind(lsock[i], rp->ai_addr, (int)(rp->ai_addrlen)) != SOCKET_ERROR)
+				break;
+
+			closesocket(lsock[i]);
+		}
+		freeaddrinfo(results);
+		if (rp == NULL)
+		{
+			for (j = 0; j < i; j++)
+				closesocket(lsock[j]);
+			delete[] hostbuf;
+			return 2;
+		}
+
+		if (listen(lsock[i], 4) == SOCKET_ERROR)
+		{
+			for (j = 0; j <= i; j++)
+				closesocket(lsock[j]);
+			delete[] hostbuf;
+			return 3;
+		}
 	}
+	delete[] hostbuf;
 
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 	while (!g_ShutdownEvent.IsSet())
 	{
 		FD_ZERO(&rd);
-		FD_SET(lsock, &rd);
-		if ((len = select((int)(lsock + 1), &rd, NULL, NULL, &tv)) == SOCKET_ERROR)
+		for (i = 0; i < nhost; i++)
+			FD_SET(lsock[i], &rd);
+		if ((len = select(0/*(int)(max(lsock) + 1)*/, &rd, NULL, NULL, &tv)) == SOCKET_ERROR)
 		{
-			closesocket(lsock);
+			for (i = 0; i < nhost; i++)
+				closesocket(lsock[i]);
 			return 4;
 		}
 		if (len > 0)
 		{
-			csock = accept(lsock, NULL, NULL);
-			if (csock == INVALID_SOCKET)
-				continue;
-			cProxyServerEx *pProxy = new cProxyServerEx();
-			pProxy->setSocket(csock);
-			HANDLE hThread = CreateThread(NULL, 0, cProxyServerEx::Reception, pProxy, 0, NULL);
-			if (hThread)
-				CloseHandle(hThread);
-			else
-				delete pProxy;
+			for (i = 0; i < nhost; i++)
+			{
+				if (FD_ISSET(lsock[i], &rd))
+				{
+					len--;
+					if ((csock = accept(lsock[i], NULL, NULL)) != INVALID_SOCKET)
+					{
+						cProxyServerEx *pProxy = new cProxyServerEx();
+						pProxy->setSocket(csock);
+						HANDLE hThread = CreateThread(NULL, 0, cProxyServerEx::Reception, pProxy, 0, NULL);
+						if (hThread)
+							CloseHandle(hThread);
+						else
+							delete pProxy;
+					}
+				}
+				if (len == 0)
+					break;
+			}
 		}
 	}
 
-	closesocket(lsock);
+	for (i = 0; i < nhost; i++)
+		closesocket(lsock[i]);
 	return 0;
 }
 
@@ -2066,7 +2108,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE/*hPrevInstance*/, LPSTR/*lpCmd
 
 	NotifyIcon(1);
 	DestroyMenu(g_hMenu);
-
 
 	WSACleanup();
 
