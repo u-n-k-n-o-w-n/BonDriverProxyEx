@@ -36,6 +36,7 @@ static BOOL g_DisableUnloadBonDriver;
 static DWORD g_ProcessPriority;		// •s—v‚¾‚Æv‚¤‚¯‚Ç•Û‚µ‚Ä‚¨‚­
 static int g_ThreadPriorityTsReader;
 static int g_ThreadPrioritySender;
+static EXECUTION_STATE g_ThreadExecutionState;
 
 #include "BdpPacket.h"
 
